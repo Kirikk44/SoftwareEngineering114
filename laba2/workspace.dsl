@@ -1,26 +1,43 @@
 workspace {
-    model {
-        user = person "Пользователь"
 
-        messenger = softwareSystem "Мессенджер" {
-            userService = container "User Service" "FastAPI, JWT, In-Memory" {
-                description "Регистрация, аутентификация, управление пользователями"
+    model {
+        user = person "User" "Пользователь системы"
+        
+        messenger = softwareSystem "Messenger" "Система обмена сообщениями" {
+            apiGateway = container "API Gateway" "Маршрутизация запросов" "Nginx, JWT"
+            
+            userService = container "User Service" {
+                description "Управление пользователями и аутентификация"
+                technology "Python FastAPI, JWT"
             }
             
-            chatService = container "Chat Service" "FastAPI, In-Memory" {
-                description "Создание и управление чатами"
+            chatService = container "Chat Service" {
+                description "Управление чатами и сообщениями"
+                technology "Python FastAPI"
             }
-            
-            user -> userService "Регистрация/логин"
-            user -> chatService "Работа с чатами"
-            userService -> chatService "Валидация токена"
         }
+
+        # Взаимодействия
+        user -> apiGateway "Отправка запросов" "HTTP"
+        
+        apiGateway -> userService "POST /token \n GET /users/{id}" "HTTP"
+        
+        apiGateway -> chatService "POST /chats\nPOST /chats/{id}/participants\nPOST /chats/{id}/messages\nGET /chats/{id}" "HTTP"
+        
+        chatService -> userService "Проверка пользователей" "HTTP"
     }
-    
+
     views {
-        container messenger {
-            include user userService chatService
+        systemContext messenger {
+            include user messenger
             autolayout
         }
+
+        container messenger {
+            include user apiGateway userService chatService
+            autolayout
+        }
+
+        theme default
     }
 }
