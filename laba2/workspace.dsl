@@ -4,8 +4,6 @@ workspace {
         user = person "User" "Пользователь системы"
         
         messenger = softwareSystem "Messenger" "Система обмена сообщениями" {
-            apiGateway = container "API Gateway" "Маршрутизация запросов" "Nginx, JWT"
-            
             userService = container "User Service" {
                 description "Управление пользователями и аутентификация"
                 technology "Python FastAPI, JWT"
@@ -15,14 +13,18 @@ workspace {
                 description "Управление чатами и сообщениями"
                 technology "Python FastAPI"
             }
+
+            postgres = container "PostgreSQL" {
+                description "Реляционная база данных"
+                technology "PostgreSQL"
+            }
         }
 
-        # Взаимодействия
-        user -> apiGateway "Отправка запросов" "HTTP"
+        user -> userService "POST /token\nGET /users/{id}" "HTTP"
         
-        apiGateway -> userService "POST /token \n GET /users/{id}" "HTTP"
+        user -> chatService "POST /chats\nPOST /chats/{id}/participants\nPOST /chats/{id}/messages\nGET /chats/{id}" "HTTP"
         
-        apiGateway -> chatService "POST /chats\nPOST /chats/{id}/participants\nPOST /chats/{id}/messages\nGET /chats/{id}" "HTTP"
+        userService -> postgres """CRUD операции\nХранение пользователей" "SQL"
         
         chatService -> userService "Проверка пользователей" "HTTP"
     }
@@ -34,7 +36,13 @@ workspace {
         }
 
         container messenger {
-            include user apiGateway userService chatService
+            include user userService chatService postgres
+            autolayout
+        }
+
+        dynamic messenger "create_user" "Создание пользователя"{
+            user -> userService "1. POST /users"
+            userService -> postgres "3. Сохранение в БД"
             autolayout
         }
 

@@ -1,10 +1,27 @@
 version: '3.8'
 
 services:
+  db:
+    container_name: db
+    image: postgres:14
+    environment:
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: userdb
+    volumes:
+      - ./user_service/db:/docker-entrypoint-initdb.d
+    ports:
+      - "5431:5432"
+    networks:
+      - messenger
+
   user_service:
     build: ./user_service
+    depends_on:
+      - db
     ports:
       - "8000:8000"
+    networks:
+      - messenger
   
   chat_service:
     build: ./chat_service
@@ -12,3 +29,8 @@ services:
       - "8001:8001"
     depends_on:
       - user_service
+    networks:
+      - messenger
+
+networks:
+  messenger:   

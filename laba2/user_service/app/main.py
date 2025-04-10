@@ -2,9 +2,13 @@ from fastapi import FastAPI, HTTPException, Depends, status
 from fastapi.security import OAuth2PasswordBearer, OAuth2PasswordRequestForm
 from pydantic import BaseModel
 from typing import List, Optional
+from sqlalchemy.orm import Session
 from datetime import datetime, timedelta
 from jose import JWTError, jwt
 from passlib.context import CryptContext
+
+from app import users_crud
+from app.models import User, UserCreate, UserResponse, get_db
 
 SECRET_KEY = "your-secret-key"
 ALGORITHM = "HS256"
@@ -12,26 +16,11 @@ ACCESS_TOKEN_EXPIRE_MINUTES = 30
 
 app = FastAPI()
 
-class User(BaseModel):
-    id: int
-    username: str
-    email: str
-    hashed_password: str
-    age: Optional[int] = None
-
-# Временное хранилище для пользователей
-users_db = []
-
-# база данных пользователей
-client_db = {
-    "admin":  "$2b$12$EixZaYVK1fsbw1ZfbX3OXePaWxn96p36WQoeG6Lruj3vjPGga31lW"  # hashed "secret"
-}
-
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="token")
 
-async def get_current_client(token: str = Depends(oauth2_scheme)):
+async def get_current_user(token: str = Depends(oauth2_scheme)):
     credentials_exception = HTTPException(
         status_code=status.HTTP_401_UNAUTHORIZED,
         detail="Could not validate credentials",
@@ -58,63 +47,85 @@ def create_access_token(data: dict, expires_delta: Optional[timedelta] = None):
     return encoded_jwt
 
 @app.post("/token")
-async def login_for_access_token(form_data: OAuth2PasswordRequestForm = Depends()):
-    password_check = False
-    if form_data.username in client_db:
-        password = client_db[form_data.username]
-        if pwd_context.verify(form_data.password, password):
-            password_check = True
-
-    if password_check:
-        access_token_expires = timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES)
-        access_token = create_access_token(data={"sub": form_data.username}, expires_delta=access_token_expires)
-        return {"access_token": access_token, "token_type": "bearer"}
-    else:
+def login_for_access_token(
+    form_data: OAuth2PasswordRequestForm = Depends(),
+    db: Session = Depends(get_db)
+):
+    user = users_crud.get_user_by_login(db, form_data.username)
+    if not user:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Incorrect username or password",
             headers={"WWW-Authenticate": "Bearer"},
         )
+    if not pwd_context.verify(form_data.password, user.password_hash):
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Incorrect username or password",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+    access_token_expires = timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES)
+    access_token = create_access_token(
+        data={"sub": user.login}, expires_delta=access_token_expires
+    )
+    return {"access_token": access_token, "token_type": "bearer"}
 
 # GET /users - Получить всех пользователей
-@app.get("/users", response_model=List[User])
-def get_users(current_user: str = Depends(get_current_client)):
-    return users_db
+@app.get("/users", response_model=List[UserResponse])
+def read_users(skip: int = 0, limit: int = 100, 
+               current_user: User = Depends(get_current_user), 
+               db: Session = Depends(get_db)):
+    users = db.query(User).offset(skip).limit(limit).all()
+    return users
 
 # GET /users/{user_id} - Получить пользователя по ID
-@app.get("/users/{user_id}", response_model=User)
-def get_user(user_id: int, current_user: str = Depends(get_current_client)):
-    for user in users_db:
-        if user.id == user_id:
-            return user
-    raise HTTPException(status_code=404, detail="User not found")
+@app.get("/users/{user_id}", response_model=UserResponse)
+def read_user(user_id: int,
+              current_user: User = Depends(get_current_user), 
+              db: Session = Depends(get_db)):
+    db_user = users_crud.get_user(db, user_id)
+    if db_user is None:
+        raise HTTPException(status_code=404, detail="User not found")
+    return db_user
 
 # POST /users - Создать нового пользователя
-@app.post("/users", response_model=User)
-def create_user(user: User, current_user: str = Depends(get_current_client)):
-    for u in users_db:
-        if u.id == user.id:
-            raise HTTPException(status_code=404, detail="User already exist")
-    users_db.append(user)
-    return user
+@app.post("/users", response_model=UserResponse)
+def create_new_user(user_data: UserCreate,
+                    current_user: User = Depends(get_current_user),
+                    db: Session = Depends(get_db)):
+    db_user = users_crud.get_user_by_login(db, user_data.login)
+    if db_user:
+        raise HTTPException(status_code=400, detail="Username already registered")
+    new_user = users_crud.create_user(db, user_data)
+    return new_user
 
 # PUT /users/{user_id} - Обновить пользователя по ID
-@app.put("/users/{user_id}", response_model=User)
-def update_user(user_id: int, updated_user: User, current_user: str = Depends(get_current_client)):
-    for index, user in enumerate(users_db):
-        if user.id == user_id:
-            users_db[index] = updated_user
-            return updated_user
-    raise HTTPException(status_code=404, detail="User not found")
+@app.put("/users/{user_id}", response_model=UserResponse)
+def update_user(user_id: int, updated_data: UserCreate,
+                current_user: User = Depends(get_current_user),
+                db: Session = Depends(get_db)):
+    db_user = users_crud.get_user(db, user_id)
+    if db_user is None:
+        raise HTTPException(status_code=404, detail="User not found")
+    # Обновляем данные (обратите внимание, что пароль здесь не обновляется — для этого можно добавить отдельную логику)
+    db_user.login = updated_data.login
+    db_user.full_name = updated_data.full_name
+    db_user.email = updated_data.email
+    db.commit()
+    db.refresh(db_user)
+    return db_user
 
 # DELETE /users/{user_id} - Удалить пользователя по ID
-@app.delete("/users/{user_id}", response_model=User)
-def delete_user(user_id: int, current_user: str = Depends(get_current_client)):
-    for index, user in enumerate(users_db):
-        if user.id == user_id:
-            deleted_user = users_db.pop(index)
-            return deleted_user
-    raise HTTPException(status_code=404, detail="User not found")
+@app.delete("/users/{user_id}", response_model=UserResponse)
+def delete_user(user_id: int,
+                current_user: User = Depends(get_current_user),
+                db: Session = Depends(get_db)):
+    db_user = users_crud.get_user(db, user_id)
+    if db_user is None:
+        raise HTTPException(status_code=404, detail="User not found")
+    db.delete(db_user)
+    db.commit()
+    return db_user
 
 # Запуск сервера
 # http://localhost:8000/openapi.json swagger
