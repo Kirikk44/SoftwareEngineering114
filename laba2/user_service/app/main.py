@@ -88,15 +88,25 @@ def read_user(user_id: int,
         raise HTTPException(status_code=404, detail="User not found")
     return db_user
 
-# POST /users - Создать нового пользователя
-@app.post("/users", response_model=UserResponse)
-def create_new_user(user_data: UserCreate,
-                    current_user: User = Depends(get_current_user),
-                    db: Session = Depends(get_db)):
-    db_user = users_crud.get_user_by_login(db, user_data.login)
-    if db_user:
-        raise HTTPException(status_code=400, detail="Username already registered")
-    new_user = users_crud.create_user(db, user_data)
+@app.post("/register", response_model=UserResponse)
+def register_user(user_data: UserCreate, db: Session = Depends(get_db)):
+    existing_user = db.query(User).filter(User.login == user_data.login).first()
+    if existing_user:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="User with this login already exists"
+        )
+
+    hashed_password = pwd_context.hash(user_data.password)
+    new_user = User(
+        login=user_data.login,
+        full_name=user_data.full_name,
+        email=user_data.email,
+        password_hash=hashed_password
+    )
+    db.add(new_user)
+    db.commit()
+    db.refresh(new_user)
     return new_user
 
 # PUT /users/{user_id} - Обновить пользователя по ID
