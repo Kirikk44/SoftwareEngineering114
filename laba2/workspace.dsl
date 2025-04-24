@@ -18,6 +18,11 @@ workspace {
                 description "Реляционная база данных"
                 technology "PostgreSQL"
             }
+
+            mongodb = container "MongoDB" {
+                description "NoSQL база данных чатов"
+                technology "MongoDB 5.0"
+            }
         }
 
         user -> userService "POST /token\nGET /users/{id}" "HTTP"
@@ -27,6 +32,9 @@ workspace {
         userService -> postgres """CRUD операции\nХранение пользователей" "SQL"
         
         chatService -> userService "Проверка пользователей" "HTTP"
+    
+        chatService -> mongodb "MongoDB Driver"
+
     }
 
     views {
@@ -36,7 +44,7 @@ workspace {
         }
 
         container messenger {
-            include user userService chatService postgres
+            include user userService chatService postgres mongodb
             autolayout
         }
 
