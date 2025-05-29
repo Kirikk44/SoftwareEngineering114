@@ -26,12 +26,12 @@ class UserCreate(BaseModel):
     login: str
     full_name: str
     email: str
-    id: int
+    password: str
+    # id: int
 
 class UserResponse(BaseModel):
     id: int
-    first_name: str
-    last_name: str
+    full_name: str
 
     class Config:
         orm_mode = True

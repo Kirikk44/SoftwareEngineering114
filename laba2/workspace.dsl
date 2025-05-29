@@ -23,12 +23,19 @@ workspace {
                 description "NoSQL база данных чатов"
                 technology "MongoDB 5.0"
             }
+
+            redis = container "Redis" {
+                description "Кеш-хранилище"
+                technology "Redis"
+            }
         }
 
         user -> userService "POST /token\nGET /users/{id}" "HTTP"
         
         user -> chatService "POST /chats\nPOST /chats/{id}/participants\nPOST /chats/{id}/messages\nGET /chats/{id}" "HTTP"
         
+        userService -> redis "Кеширование" "Redis Protocol"
+
         userService -> postgres """CRUD операции\nХранение пользователей" "SQL"
         
         chatService -> userService "Проверка пользователей" "HTTP"
@@ -44,7 +51,7 @@ workspace {
         }
 
         container messenger {
-            include user userService chatService postgres mongodb
+            include user userService chatService postgres mongodb redis
             autolayout
         }
 
